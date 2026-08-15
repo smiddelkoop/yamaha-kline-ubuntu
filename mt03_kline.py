@@ -44,7 +44,7 @@ except ImportError:
         "of:  sudo apt install python3-serial"
     )
 
-from kline_protocol import decode_frame, error_flags
+from kline_protocol import decode_frame, error_flags, FAULT_CODES
 
 DEFAULT_BAUD = 16064          # non-standaard Yamaha K-line baudrate
 GAP_SECONDS = 0.004          # inter-frame gap die frames scheidt (~4 ms)
@@ -160,7 +160,8 @@ def run(args):
     # er geen data verloren gaat als het proces hard wordt afgebroken.
     raw_f = open(raw_path, "w", buffering=1)
     csv_f = open(csv_path, "w", buffering=1)
-    csv_f.write("time,len,kind,checksum,rpm,velocity,error_hex,temp_raw,temp_c\n")
+    csv_f.write("time,len,kind,checksum,rpm,velocity,error_hex,temp_raw,temp_c,"
+                "fault_code,fault_desc\n")
 
     print(f"{C.BOLD}Yamaha MT-03 K-line reader{C.RESET}")
     print(f"  Poort   : {port}")
@@ -173,6 +174,7 @@ def run(args):
     last_byte = time.monotonic()
     paused = False
     stats = {"frames": 0, "data": 0, "bad": 0}
+    faults_seen = {}   # code -> aantal keer gezien
     t0 = time.monotonic()
 
     def flush(frame: bytes):
@@ -180,7 +182,8 @@ def run(args):
             return
         stats["frames"] += 1
         ts = f"{time.monotonic() - t0:8.2f}"
-        d = decode_frame(frame, temp_offset=args.temp_offset)
+        d = decode_frame(frame, temp_offset=args.temp_offset,
+                         fault_encoding=args.fault_encoding)
 
         # ruwe log altijd
         if not paused:
@@ -193,24 +196,35 @@ def run(args):
                 stats["bad"] += 1
             col = C.GREEN if ok else C.RED
             mark = "OK " if ok else "BAD"
-            flags = error_flags(d.error) if d.error is not None else []
-            flagtxt = "" if d.error == 0 else f"  {C.YELLOW}ERR {' '.join(flags)}{C.RESET}"
+            # Herkende Yamaha-foutcode krijgt voorrang in de weergave.
+            if d.fault_code is not None:
+                faults_seen[d.fault_code] = faults_seen.get(d.fault_code, 0) + 1
+                errtxt = (f"  {C.RED}{C.BOLD}!! FOUT {d.fault_code}: "
+                          f"{d.fault_desc}{C.RESET} "
+                          f"{C.DIM}(0x{d.error:02x}, {d.fault_read}){C.RESET}")
+            elif d.error == 0:
+                errtxt = ""
+            else:
+                flags = error_flags(d.error)
+                errtxt = f"  {C.YELLOW}status 0x{d.error:02x} [{' '.join(flags)}]{C.RESET}"
             line = (
                 f"{C.DIM}{ts}{C.RESET} "
                 f"{col}[{mark}]{C.RESET} "
                 f"RPM {C.BOLD}{d.rpm:5d}{C.RESET}  "
                 f"km/h(ruw) {d.velocity:3d}  "
                 f"temp {d.temp_c:3d}  "
-                f"err 0x{d.error:02x}{flagtxt}"
+                f"err 0x{d.error:02x}{errtxt}"
             )
             if args.raw:
                 line += f"   {C.DIM}{d.hex()}{C.RESET}"
             print(line)
             if not paused:
+                fc = d.fault_code if d.fault_code is not None else ""
+                fd = f"\"{d.fault_desc}\"" if d.fault_desc else ""
                 csv_f.write(
                     f"{ts.strip()},{d.length},{d.kind},"
                     f"{'ok' if ok else 'bad'},{d.rpm},{d.velocity},"
-                    f"0x{d.error:02x},{d.temp_raw},{d.temp_c}\n"
+                    f"0x{d.error:02x},{d.temp_raw},{d.temp_c},{fc},{fd}\n"
                 )
         elif args.raw:
             # immo/idle/onbekend alleen tonen in raw-modus
@@ -260,6 +274,14 @@ def run(args):
         print(f"\n{C.BOLD}Gestopt.{C.RESET} "
               f"{stats['frames']} frames, {stats['data']} dataframes, "
               f"{stats['bad']} checksum-fouten, {dur:.0f}s.")
+        if faults_seen:
+            print(f"{C.RED}{C.BOLD}Herkende foutcodes tijdens deze sessie:{C.RESET}")
+            for code in sorted(faults_seen):
+                print(f"  {C.RED}FOUT {code}{C.RESET}: "
+                      f"{FAULT_CODES.get(code, '?')}  "
+                      f"{C.DIM}({faults_seen[code]}x){C.RESET}")
+        else:
+            print("Geen bekende foutcodes gezien.")
         print(f"Logs opgeslagen:\n  {raw_path}\n  {csv_path}")
 
 
@@ -272,6 +294,9 @@ def parse_args(argv=None):
                    help=f"baudrate (default {DEFAULT_BAUD})")
     p.add_argument("--temp-offset", type=int, default=0,
                    help="offset op koelvloeistoftemp-byte (kalibratie)")
+    p.add_argument("--fault-encoding", default="auto",
+                   choices=["auto", "bcd", "decimal", "raw"],
+                   help="hoe het foutcode-byte wordt gelezen (default auto)")
     p.add_argument("--logdir", default="log", help="map voor logbestanden")
     p.add_argument("--raw", action="store_true",
                    help="toon ook ruwe hex en immo/idle-frames")
