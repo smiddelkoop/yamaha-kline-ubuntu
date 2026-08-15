@@ -194,21 +194,22 @@ def run(args):
                 stats["bad"] += 1
             col = C.GREEN if ok else C.RED
             mark = "OK " if ok else "BAD"
-            # Herkende Yamaha-foutcode krijgt voorrang in de weergave.
+            # Foutcode uit het error-byte alleen als expliciet aangezet.
             if d.fault_code is not None:
                 faults_seen[d.fault_code] = faults_seen.get(d.fault_code, 0) + 1
-                errtxt = (f"  {C.RED}{C.BOLD}!! FOUT {d.fault_code}: "
+                errtxt = (f"  {C.YELLOW}code {d.fault_code}: "
                           f"{d.fault_desc}{C.RESET} "
                           f"{C.DIM}(0x{d.error:02x}, {d.fault_read}){C.RESET}")
             elif d.error == 0:
                 errtxt = ""
             else:
                 flags = error_flags(d.error)
-                errtxt = f"  {C.YELLOW}status 0x{d.error:02x} [{' '.join(flags)}]{C.RESET}"
-            # Tempbyte 0xFF = geen geldige koelvloeistoftemperatuur in dit frame.
+                errtxt = f"  {C.DIM}status 0x{d.error:02x} [{' '.join(flags)}]{C.RESET}"
+            # Tempbyte 0xFF = geen geldige temp in dit frame. Neutraal tonen:
+            # normaal wanneer de motor niet echt draait, dus GEEN alarm.
             if d.temp_open:
                 stats["temp_open"] += 1
-                temptxt = f"{C.RED}{C.BOLD}temp 0xff(ongeldig){C.RESET}"
+                temptxt = f"{C.DIM}temp n.v.t.(0xff){C.RESET}"
             else:
                 temptxt = f"temp {d.temp_c:3d}"
             line = (
@@ -266,17 +267,16 @@ def run(args):
               f"{stats['frames']} frames, {stats['data']} dataframes, "
               f"{stats['bad']} checksum-fouten, {dur:.0f}s.")
         if stats["temp_open"]:
-            print(f"{C.RED}{C.BOLD}!! Temp-byte = 0xff (ONGELDIG) in "
-                  f"{stats['temp_open']} frames -- geen geldige koelvloeistoftemp. "
-                  f"Controleer sensor EN bedrading.{C.RESET}")
+            print(f"{C.DIM}Info: tempbyte 0xff (geen geldige temp) in "
+                  f"{stats['temp_open']} frames -- normaal wanneer de motor niet "
+                  f"echt draait; geen op zichzelf staand alarm.{C.RESET}")
         if faults_seen:
-            print(f"{C.RED}{C.BOLD}Herkende foutcodes tijdens deze sessie:{C.RESET}")
+            print(f"{C.YELLOW}Foutcodes uit het error-byte (alleen zichtbaar met "
+                  f"--fault-encoding; het error-byte is een status-byte, "
+                  f"interpreteer voorzichtig):{C.RESET}")
             for code in sorted(faults_seen):
-                print(f"  {C.RED}FOUT {code}{C.RESET}: "
-                      f"{FAULT_CODES.get(code, '?')}  "
+                print(f"  code {code}: {FAULT_CODES.get(code, '?')}  "
                       f"{C.DIM}({faults_seen[code]}x){C.RESET}")
-        else:
-            print("Geen bekende foutcodes gezien.")
         print(f"Logs opgeslagen:\n  {raw_path}\n  {csv_path}")
 
 
@@ -289,9 +289,10 @@ def parse_args(argv=None):
                    help=f"baudrate (default {DEFAULT_BAUD})")
     p.add_argument("--temp-offset", type=int, default=0,
                    help="offset op koelvloeistoftemp-byte (kalibratie)")
-    p.add_argument("--fault-encoding", default="auto",
+    p.add_argument("--fault-encoding", default="raw",
                    choices=["auto", "bcd", "decimal", "raw"],
-                   help="hoe het foutcode-byte wordt gelezen (default auto)")
+                   help="foutcode-vertaling uit het error-byte; standaard 'raw' "
+                        "(uit), want dat byte is een status-byte, geen DTC-kanaal")
     p.add_argument("--logdir", default="log", help="map voor logbestanden")
     p.add_argument("--raw", action="store_true",
                    help="toon ook ruwe hex en immo/idle-frames")
