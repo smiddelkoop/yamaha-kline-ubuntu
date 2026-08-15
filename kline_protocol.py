@@ -29,6 +29,10 @@ from typing import List, Optional, Tuple
 # warme temperatuur (bv. via de dashboard-temperatuurweergave).
 DEFAULT_TEMP_OFFSET = 0
 
+# Tempbyte 0xFF = open circuit / geen signaal van de koelvloeistofsensor.
+# (Waargenomen bij een defecte/losgekoppelde sensor: Yamaha-foutcode 21.)
+TEMP_OPEN = 0xFF
+
 # ---------------------------------------------------------------------------
 # Yamaha ECU-foutcodes (de 2-cijferige codes die de zelfdiagnose toont).
 # Bron: door de gebruiker aangeleverde "Core Yamaha ECU Fault Codes".
@@ -115,6 +119,7 @@ class Decoded:
     fault_code: Optional[int] = None      # herkende Yamaha-foutcode (bv. 42)
     fault_desc: Optional[str] = None      # leesbare omschrijving
     fault_read: Optional[str] = None      # welke lezing gaf de match (bcd/decimal)
+    temp_open: bool = False               # tempbyte == 0xFF (sensor open circuit)
 
     def hex(self) -> str:
         return " ".join(f"{b:02x}" for b in self.raw)
@@ -145,6 +150,7 @@ def decode_frame(frame: bytes,
             fault_code=fault[0] if fault else None,
             fault_desc=fault[1] if fault else None,
             fault_read=fault[2] if fault else None,
+            temp_open=(temp_raw == TEMP_OPEN),
         )
 
     # 5-byte data-frame: RPM VEL ERR TEMP CHK
@@ -160,6 +166,7 @@ def decode_frame(frame: bytes,
             fault_code=fault[0] if fault else None,
             fault_desc=fault[1] if fault else None,
             fault_read=fault[2] if fault else None,
+            temp_open=(temp_raw == TEMP_OPEN),
         )
 
     # Immobilizer-handshake / idle-blokken hebben afwijkende lengtes/inhoud.
@@ -186,3 +193,49 @@ def error_flags(error: int) -> List[str]:
         if error & (1 << bit):
             flags.append(f"bit{bit} (0x{1 << bit:02x})")
     return flags
+
+
+class FrameSync:
+    """
+    Synchroniseer een byte-stream op frame-grenzen via de CHECKSUM, niet op
+    tijd-gaps. Dit lost de misalignment op die ontstaat als de K-line-stream
+    geen schone inter-frame gaps heeft (dan las de oude gap-methode frames
+    verkeerd uit -> allemaal 'checksum bad').
+
+    Herkent 6-byte frames (01 RPM VEL ERR TEMP CHK) en 5-byte frames
+    (RPM VEL ERR TEMP CHK). Bij twijfel schuift hij 1 byte op tot een frame
+    weer valideert; de stream herstelt zichzelf zo binnen enkele bytes.
+
+    Gebruik (streaming):
+        fs = FrameSync()
+        for frame in fs.feed(chunk_bytes):
+            ...
+    of in een keer:
+        frames = FrameSync().feed(hele_stream)
+    """
+
+    def __init__(self):
+        self.buf = bytearray()
+
+    def feed(self, data) -> list:
+        self.buf.extend(data)
+        out = []
+        b = self.buf
+        while len(b) >= 5:
+            n = len(b)
+            if b[0] == 0x01 and n >= 6 and (sum(b[1:5]) & 0xFF) == b[5]:
+                out.append(bytes(b[:6]))
+                del b[:6]
+            elif (sum(b[:4]) & 0xFF) == b[4]:
+                out.append(bytes(b[:5]))
+                del b[:5]
+            elif b[0] == 0x01 and n < 6:
+                break                    # wacht op meer bytes om 6-byte te testen
+            else:
+                del b[:1]                # resync: schuif 1 byte op
+        return out
+
+
+def frames_from_stream(data: bytes) -> list:
+    """Gemaksfunctie: haal alle geldige frames uit een complete byte-stream."""
+    return FrameSync().feed(data)

@@ -4,7 +4,8 @@ decode_log.py - Her-analyseer een opgeslagen K-line log (ruwe hex).
 
 Werkt op zowel de logs die mt03_kline.py wegschrijft als op vrije-vorm
 hex-dumps (zoals de originele 'ECU Log.txt'): niet-hex regels en labels
-worden genegeerd.
+worden genegeerd. Alle hex-bytes worden als een stream gelezen en op
+checksum gesynchroniseerd, zodat ook verkeerd-geframede logs kloppen.
 
 Gebruik:
     python3 decode_log.py ECU_Log.txt
@@ -16,18 +17,24 @@ import re
 import sys
 from collections import Counter
 
-from kline_protocol import decode_frame, error_flags, FAULT_CODES
+from kline_protocol import decode_frame, error_flags, FAULT_CODES, frames_from_stream
 
-HEXLINE = re.compile(r"^\s*([0-9a-fA-F]{2})(\s+[0-9a-fA-F]{2})*\s*$")
+HEXTOKEN = re.compile(r"^[0-9a-fA-F]{2}$")
 
 
 def load_frames(path):
-    frames = []
+    """
+    Lees ALLE hex-bytes uit het bestand als één stream (regelgrenzen en labels
+    worden genegeerd) en synchroniseer op checksum. Dit herstelt logs die door
+    de oude gap-framing verkeerd waren uitgelijnd.
+    """
+    data = bytearray()
     with open(path) as f:
         for line in f:
-            if HEXLINE.match(line):
-                frames.append(bytes(int(b, 16) for b in line.split()))
-    return frames
+            for tok in line.split():
+                if HEXTOKEN.match(tok):
+                    data.append(int(tok, 16))
+    return frames_from_stream(bytes(data))
 
 
 def main(argv=None):
@@ -50,6 +57,7 @@ def main(argv=None):
     ok = bad = data = 0
     err_hist = Counter()
     fault_hist = Counter()          # code -> aantal
+    temp_open_cnt = 0
     rpm_min = None
     rpm_max = None
     rows = []
@@ -66,6 +74,8 @@ def main(argv=None):
             err_hist[d.error] += 1
             if d.fault_code is not None:
                 fault_hist[d.fault_code] += 1
+            if d.temp_open:
+                temp_open_cnt += 1
             rpm_min = d.rpm if rpm_min is None else min(rpm_min, d.rpm)
             rpm_max = d.rpm if rpm_max is None else max(rpm_max, d.rpm)
             rows.append(d)
@@ -80,13 +90,27 @@ def main(argv=None):
             flags = " ".join(error_flags(val))
             print(f"    0x{val:02x} : {cnt:5d}   [{flags}]")
 
+        if temp_open_cnt:
+            pct = 100 * temp_open_cnt / data
+            print(f"\n>> Koelvloeistofsensor: temp=0xff (OPEN CIRCUIT) in "
+                  f"{temp_open_cnt}/{data} frames ({pct:.0f}%) "
+                  f"-> Yamaha-foutcode 21.")
+
+        # Drempel: een echte, actieve storing is persistent. Losse matches
+        # komen vaak uit immobilizer-handshake bytes die toevallig uitlijnen.
+        threshold = max(10, int(0.01 * data))
+        persistent = {c: n for c, n in fault_hist.items() if n >= threshold}
+        incidental = {c: n for c, n in fault_hist.items() if n < threshold}
+
         print("\n>> Herkende Yamaha-foutcodes:")
-        if fault_hist:
-            for code, cnt in sorted(fault_hist.items()):
+        if persistent:
+            for code, cnt in sorted(persistent.items()):
                 print(f"    FOUT {code}: {FAULT_CODES.get(code, '?')}  ({cnt}x)")
         else:
-            print("    geen bekende foutcodes aangetroffen "
-                  "(error-byte bevatte alleen statuswaarden)")
+            print("    geen persistente foutcodes in het error-byte")
+        if incidental:
+            det = ", ".join(f"{c} ({n}x)" for c, n in sorted(incidental.items()))
+            print(f"    (incidenteel, waarschijnlijk immo-handshake ruis: {det})")
 
     if args.show and rows:
         print(f"\nEerste {min(args.show, len(rows))} dataframes:")
