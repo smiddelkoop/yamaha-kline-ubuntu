@@ -20,7 +20,7 @@ Alle frames worden weggeschreven naar log/ met een tijdstempel:
     log/kline_YYYYmmdd_HHMMSS_decoded.csv  (gedecodeerde dataframes)
 
 Gebaseerd op het protocol uit terrafirma2021/Yamaha-K-line-* (Arduino/Windows),
-herschreven voor Python 3 + Linux, met checksum-validatie en decodering.
+herschreven voor Python 3 + Linux, met checksum-synchronisatie en decodering.
 """
 
 import argparse
@@ -44,10 +44,9 @@ except ImportError:
         "of:  sudo apt install python3-serial"
     )
 
-from kline_protocol import decode_frame, error_flags, FAULT_CODES
+from kline_protocol import decode_frame, error_flags, FAULT_CODES, FrameSync
 
 DEFAULT_BAUD = 16064          # non-standaard Yamaha K-line baudrate
-GAP_SECONDS = 0.004          # inter-frame gap die frames scheidt (~4 ms)
 READ_TIMEOUT = 0.02          # blokkeer-timeout per read()
 
 
@@ -170,10 +169,9 @@ def run(args):
     print(f"  CSV log : {csv_path}")
     print(f"  {C.DIM}spatie = pauze/hervat loggen, q = stoppen{C.RESET}\n")
 
-    buf = bytearray()
-    last_byte = time.monotonic()
+    fs = FrameSync()
     paused = False
-    stats = {"frames": 0, "data": 0, "bad": 0}
+    stats = {"frames": 0, "data": 0, "bad": 0, "temp_open": 0}
     faults_seen = {}   # code -> aantal keer gezien
     t0 = time.monotonic()
 
@@ -207,12 +205,18 @@ def run(args):
             else:
                 flags = error_flags(d.error)
                 errtxt = f"  {C.YELLOW}status 0x{d.error:02x} [{' '.join(flags)}]{C.RESET}"
+            # Tempbyte 0xFF = koelvloeistofsensor open circuit (foutcode 21).
+            if d.temp_open:
+                stats["temp_open"] += 1
+                temptxt = f"{C.RED}{C.BOLD}temp OPEN(0xff)!{C.RESET}"
+            else:
+                temptxt = f"temp {d.temp_c:3d}"
             line = (
                 f"{C.DIM}{ts}{C.RESET} "
                 f"{col}[{mark}]{C.RESET} "
                 f"RPM {C.BOLD}{d.rpm:5d}{C.RESET}  "
                 f"km/h(ruw) {d.velocity:3d}  "
-                f"temp {d.temp_c:3d}  "
+                f"{temptxt}  "
                 f"err 0x{d.error:02x}{errtxt}"
             )
             if args.raw:
@@ -237,22 +241,11 @@ def run(args):
     try:
         with RawKeyboard() as kb:
             while True:
-                b = ser.read(1)
-                now = time.monotonic()
-
-                if b:
-                    # nieuwe byte na een gap -> vorig frame afsluiten
-                    if buf and (now - last_byte) > GAP_SECONDS:
-                        flush(bytes(buf))
-                        buf = bytearray()
-                    buf += b
-                    last_byte = now
-                else:
-                    # geen byte (timeout): als er een frame in de buffer staat
-                    # en de gap is verstreken, sluit het af.
-                    if buf and (now - last_byte) > GAP_SECONDS:
-                        flush(bytes(buf))
-                        buf = bytearray()
+                # lees wat er is (of blokkeer kort) en synchroniseer op checksum
+                data = ser.read(ser.in_waiting or 1)
+                if data:
+                    for frame in fs.feed(data):
+                        flush(frame)
 
                 key = kb.getch()
                 if key:
@@ -265,8 +258,6 @@ def run(args):
     except KeyboardInterrupt:
         pass
     finally:
-        if buf:
-            flush(bytes(buf))
         ser.close()
         raw_f.close()
         csv_f.close()
@@ -274,6 +265,10 @@ def run(args):
         print(f"\n{C.BOLD}Gestopt.{C.RESET} "
               f"{stats['frames']} frames, {stats['data']} dataframes, "
               f"{stats['bad']} checksum-fouten, {dur:.0f}s.")
+        if stats["temp_open"]:
+            print(f"{C.RED}{C.BOLD}!! Koelvloeistofsensor OPEN CIRCUIT "
+                  f"(temp=0xff) in {stats['temp_open']} frames "
+                  f"-> Yamaha-foutcode 21.{C.RESET}")
         if faults_seen:
             print(f"{C.RED}{C.BOLD}Herkende foutcodes tijdens deze sessie:{C.RESET}")
             for code in sorted(faults_seen):
