@@ -29,9 +29,17 @@ from typing import List, Optional, Tuple
 # warme temperatuur (bv. via de dashboard-temperatuurweergave).
 DEFAULT_TEMP_OFFSET = 0
 
-# Tempbyte 0xFF = open circuit / geen signaal van de koelvloeistofsensor.
-# (Waargenomen bij een defecte/losgekoppelde sensor: Yamaha-foutcode 21.)
+# Tempbyte 0xFF = geen geldige koelvloeistoftemperatuur in dit frame
+# (ongeldig/placeholder). Kan wijzen op een sensor-/bedradingsprobleem, maar
+# is NIET automatisch bewijs van een kapotte sensor -- interpreteer voorzichtig.
 TEMP_OPEN = 0xFF
+
+# Immobilizer-handshake en andere niet-telemetrie frames kunnen toevallig een
+# geldige checksum hebben en dan als spookdata verschijnen (valse snelheid/temp/
+# foutcode). We herkennen ze en tellen ze niet als motordata:
+#   - alle vier de payload-bytes gelijk (bv. 47 47 47 47, 45 45 45 45), of
+#   - een onmogelijk hoog toerental (RPM-byte boven de redline).
+REDLINE_RPM = 9000
 
 # ---------------------------------------------------------------------------
 # Yamaha ECU-foutcodes (de 2-cijferige codes die de zelfdiagnose toont).
@@ -119,7 +127,7 @@ class Decoded:
     fault_code: Optional[int] = None      # herkende Yamaha-foutcode (bv. 42)
     fault_desc: Optional[str] = None      # leesbare omschrijving
     fault_read: Optional[str] = None      # welke lezing gaf de match (bcd/decimal)
-    temp_open: bool = False               # tempbyte == 0xFF (sensor open circuit)
+    temp_open: bool = False               # tempbyte == 0xFF (geen geldige temp)
 
     def hex(self) -> str:
         return " ".join(f"{b:02x}" for b in self.raw)
@@ -128,6 +136,16 @@ class Decoded:
 def _checksum(payload: bytes) -> int:
     """CHK over de eerste 4 payload-bytes (RPM, VEL, ERR, TEMP)."""
     return sum(payload[:4]) & 0xFF
+
+
+def _looks_like_noise(payload: bytes) -> bool:
+    """Immobilizer-handshake / niet-telemetrie frame? (zie REDLINE_RPM)."""
+    p = payload[:4]
+    if p[0] == p[1] == p[2] == p[3]:
+        return True
+    if p[0] * 50 > REDLINE_RPM:
+        return True
+    return False
 
 
 def decode_frame(frame: bytes,
@@ -139,6 +157,8 @@ def decode_frame(frame: bytes,
     # 6-byte data-frame: 01 RPM VEL ERR TEMP CHK
     if n == 6 and frame[0] == 0x01:
         payload = frame[1:]           # RPM VEL ERR TEMP CHK
+        if _looks_like_noise(payload):
+            return Decoded(raw=frame, length=n, kind="immo", checksum_ok=True)
         ok = _checksum(payload) == payload[4]
         temp_raw = payload[3]
         error = payload[2]
@@ -155,6 +175,8 @@ def decode_frame(frame: bytes,
 
     # 5-byte data-frame: RPM VEL ERR TEMP CHK
     if n == 5:
+        if _looks_like_noise(frame):
+            return Decoded(raw=frame, length=n, kind="immo", checksum_ok=True)
         ok = _checksum(frame) == frame[4]
         temp_raw = frame[3]
         error = frame[2]

@@ -92,9 +92,12 @@ def main(argv=None):
 
         if temp_open_cnt:
             pct = 100 * temp_open_cnt / data
-            print(f"\n>> Koelvloeistofsensor: temp=0xff (OPEN CIRCUIT) in "
-                  f"{temp_open_cnt}/{data} frames ({pct:.0f}%) "
-                  f"-> Yamaha-foutcode 21.")
+            print(f"\n>> Temp-byte = 0xff (ONGELDIG / geen waarde) in "
+                  f"{temp_open_cnt}/{data} frames ({pct:.0f}%).")
+            print("   Geen geldige koelvloeistoftemperatuur in deze frames. "
+                  "Controleer sensor EN bedrading/connector;")
+            print("   dit is NIET automatisch bewijs van een kapotte sensor "
+                  "(kan ook een ECU-status zijn).")
 
         # Drempel: een echte, actieve storing is persistent. Losse matches
         # komen vaak uit immobilizer-handshake bytes die toevallig uitlijnen.
