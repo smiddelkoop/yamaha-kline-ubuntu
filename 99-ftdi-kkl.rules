@@ -1,0 +1,6 @@
+# Udev-regel: geef de KKL 409.1 (FTDI FT232RL) een vaste naam /dev/kkl
+# en zet rechten zodat je zonder sudo mag lezen.
+# Installeren:
+#   sudo cp 99-ftdi-kkl.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", SYMLINK+="kkl", MODE="0666"
