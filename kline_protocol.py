@@ -71,13 +71,19 @@ FAULT_CODES = {
     50: "Defecte ECU intern geheugen",
 }
 
-# Hoe wordt het foutcode-byte gelezen? De exacte on-wire codering voor deze
-# stream is niet bevestigd, daarom instelbaar:
+# Foutcode-vertaling uit het error-byte.
+#
+# BELANGRIJK: in de tot nu toe opgenomen streams is het error-byte een
+# STATUS-byte (bv. 0x00 gezond, 0x40/0x80 bij problemen) en GEEN Yamaha
+# storingscodekanaal. Elke "foutcode" die je daaruit afleidt is daarom vals
+# (bv. immo-handshake bytes die toevallig als 0x43 -> code 43 uitkomen).
+# Daarom staat de vertaling standaard UIT ("raw"). Zet 'm alleen aan als je een
+# echte diagnosemodus-stream met stored codes uitleest.
+#   "raw"     -> geen foutcode-vertaling (default)
 #   "bcd"     -> lees de twee hex-cijfers als decimaal  (0x42 -> code 42)
 #   "decimal" -> lees de bytewaarde als decimaal         (0x2a -> code 42)
 #   "auto"    -> probeer eerst bcd, dan decimal
-#   "raw"     -> geen foutcode-vertaling
-DEFAULT_FAULT_ENCODING = "auto"
+DEFAULT_FAULT_ENCODING = "raw"
 
 
 def decode_fault(error_byte: int,

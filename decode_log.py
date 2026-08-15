@@ -41,9 +41,10 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Decodeer een K-line hex-log.")
     ap.add_argument("logfile")
     ap.add_argument("--temp-offset", type=int, default=0)
-    ap.add_argument("--fault-encoding", default="auto",
+    ap.add_argument("--fault-encoding", default="raw",
                     choices=["auto", "bcd", "decimal", "raw"],
-                    help="hoe het foutcode-byte wordt gelezen (default auto)")
+                    help="foutcode-vertaling uit het error-byte; standaard 'raw' "
+                         "(uit), want dat byte is een status-byte, geen DTC-kanaal")
     ap.add_argument("--csv", help="schrijf gedecodeerde dataframes naar CSV")
     ap.add_argument("--show", type=int, default=20,
                     help="aantal dataframes om te tonen (0 = alle)")
@@ -92,33 +93,23 @@ def main(argv=None):
 
         if temp_open_cnt:
             pct = 100 * temp_open_cnt / data
-            print(f"\n>> Temp-byte = 0xff (ONGELDIG / geen waarde) in "
-                  f"{temp_open_cnt}/{data} frames ({pct:.0f}%).")
-            print("   Geen geldige koelvloeistoftemperatuur in deze frames. "
-                  "Controleer sensor EN bedrading/connector;")
-            print("   dit is NIET automatisch bewijs van een kapotte sensor "
-                  "(kan ook een ECU-status zijn).")
+            print(f"\nInfo: tempbyte 0xff (geen geldige temp) in "
+                  f"{temp_open_cnt}/{data} frames ({pct:.0f}%). "
+                  f"Normaal wanneer de motor niet echt draait; geen alarm.")
 
-        # Drempel: een echte, actieve storing is persistent. Losse matches
-        # komen vaak uit immobilizer-handshake bytes die toevallig uitlijnen.
-        threshold = max(10, int(0.01 * data))
-        persistent = {c: n for c, n in fault_hist.items() if n >= threshold}
-        incidental = {c: n for c, n in fault_hist.items() if n < threshold}
-
-        print("\n>> Herkende Yamaha-foutcodes:")
-        if persistent:
-            for code, cnt in sorted(persistent.items()):
-                print(f"    FOUT {code}: {FAULT_CODES.get(code, '?')}  ({cnt}x)")
-        else:
-            print("    geen persistente foutcodes in het error-byte")
-        if incidental:
-            det = ", ".join(f"{c} ({n}x)" for c, n in sorted(incidental.items()))
-            print(f"    (incidenteel, waarschijnlijk immo-handshake ruis: {det})")
+        # Foutcode-vertaling staat standaard uit ('raw'); dit blok toont alleen
+        # iets als je 'm expliciet aanzet met --fault-encoding. Het error-byte is
+        # een status-byte, dus behandel elke code als indicatief.
+        if fault_hist:
+            print("\nFoutcodes uit het error-byte (--fault-encoding aan; "
+                  "status-byte, interpreteer voorzichtig):")
+            for code, cnt in sorted(fault_hist.items()):
+                print(f"    code {code}: {FAULT_CODES.get(code, '?')}  ({cnt}x)")
 
     if args.show and rows:
         print(f"\nEerste {min(args.show, len(rows))} dataframes:")
         for d in rows[:args.show]:
-            fault = f"  << FOUT {d.fault_code}: {d.fault_desc}" if d.fault_code else ""
+            fault = f"  << code {d.fault_code}: {d.fault_desc}" if d.fault_code else ""
             print(f"  {d.hex():20s} RPM {d.rpm:5d}  vel {d.velocity:3d}  "
                   f"err 0x{d.error:02x}  temp {d.temp_c:3d}  "
                   f"chk {'ok' if d.checksum_ok else 'BAD'}{fault}")
