@@ -205,10 +205,10 @@ def run(args):
             else:
                 flags = error_flags(d.error)
                 errtxt = f"  {C.YELLOW}status 0x{d.error:02x} [{' '.join(flags)}]{C.RESET}"
-            # Tempbyte 0xFF = koelvloeistofsensor open circuit (foutcode 21).
+            # Tempbyte 0xFF = geen geldige koelvloeistoftemperatuur in dit frame.
             if d.temp_open:
                 stats["temp_open"] += 1
-                temptxt = f"{C.RED}{C.BOLD}temp OPEN(0xff)!{C.RESET}"
+                temptxt = f"{C.RED}{C.BOLD}temp 0xff(ongeldig){C.RESET}"
             else:
                 temptxt = f"temp {d.temp_c:3d}"
             line = (
@@ -266,9 +266,9 @@ def run(args):
               f"{stats['frames']} frames, {stats['data']} dataframes, "
               f"{stats['bad']} checksum-fouten, {dur:.0f}s.")
         if stats["temp_open"]:
-            print(f"{C.RED}{C.BOLD}!! Koelvloeistofsensor OPEN CIRCUIT "
-                  f"(temp=0xff) in {stats['temp_open']} frames "
-                  f"-> Yamaha-foutcode 21.{C.RESET}")
+            print(f"{C.RED}{C.BOLD}!! Temp-byte = 0xff (ONGELDIG) in "
+                  f"{stats['temp_open']} frames -- geen geldige koelvloeistoftemp. "
+                  f"Controleer sensor EN bedrading.{C.RESET}")
         if faults_seen:
             print(f"{C.RED}{C.BOLD}Herkende foutcodes tijdens deze sessie:{C.RESET}")
             for code in sorted(faults_seen):
