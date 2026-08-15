@@ -93,9 +93,9 @@ def main(argv=None):
 
         if temp_open_cnt:
             pct = 100 * temp_open_cnt / data
-            print(f"\nInfo: tempbyte 0xff (geen geldige temp) in "
-                  f"{temp_open_cnt}/{data} frames ({pct:.0f}%). "
-                  f"Normaal wanneer de motor niet echt draait; geen alarm.")
+            print(f"\nInfo: tempbyte = 0xff (geen temperatuurwaarde in deze frames) "
+                  f"in {temp_open_cnt}/{data} frames ({pct:.0f}%). "
+                  f"Dit is een byte-waarde, geen storingsmelding.")
 
         # Foutcode-vertaling staat standaard uit ('raw'); dit blok toont alleen
         # iets als je 'm expliciet aanzet met --fault-encoding. Het error-byte is

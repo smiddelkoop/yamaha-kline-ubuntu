@@ -205,11 +205,11 @@ def run(args):
             else:
                 flags = error_flags(d.error)
                 errtxt = f"  {C.DIM}status 0x{d.error:02x} [{' '.join(flags)}]{C.RESET}"
-            # Tempbyte 0xFF = geen geldige temp in dit frame. Neutraal tonen:
-            # normaal wanneer de motor niet echt draait, dus GEEN alarm.
+            # Tempbyte 0xFF = geen temperatuurwaarde in dit frame. Puur de
+            # byte-waarde tonen, neutraal -- geen uitspraak over de sensor.
             if d.temp_open:
                 stats["temp_open"] += 1
-                temptxt = f"{C.DIM}temp n.v.t.(0xff){C.RESET}"
+                temptxt = f"{C.DIM}temp -(0xff){C.RESET}"
             else:
                 temptxt = f"temp {d.temp_c:3d}"
             line = (
@@ -267,9 +267,9 @@ def run(args):
               f"{stats['frames']} frames, {stats['data']} dataframes, "
               f"{stats['bad']} checksum-fouten, {dur:.0f}s.")
         if stats["temp_open"]:
-            print(f"{C.DIM}Info: tempbyte 0xff (geen geldige temp) in "
-                  f"{stats['temp_open']} frames -- normaal wanneer de motor niet "
-                  f"echt draait; geen op zichzelf staand alarm.{C.RESET}")
+            print(f"{C.DIM}Info: tempbyte = 0xff (geen temperatuurwaarde in deze "
+                  f"frames) in {stats['temp_open']} frames. "
+                  f"Byte-waarde, geen storingsmelding.{C.RESET}")
         if faults_seen:
             print(f"{C.YELLOW}Foutcodes uit het error-byte (alleen zichtbaar met "
                   f"--fault-encoding; het error-byte is een status-byte, "
