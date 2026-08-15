@@ -29,8 +29,10 @@ ERR  = status/error-byte (bitmasker; 0x00 = geen actieve vlag)
 TEMP = koelvloeistoftemp-byte (ruw — zie 'Temperatuur kalibreren')
 ```
 
-Op de meegeleverde voorbeeldlog (`examples/ECU_Log_sample.txt`) valideert **4630 van de
-4656** dataframes correct; de rest zijn immobilizer-handshake bytes (geen dataframes).
+Op een volledige capture valideert **~99,4%** van de dataframes correct (op de originele
+log 4630 van 4656); de rest zijn immobilizer-handshake bytes, geen dataframes.
+`examples/ECU_Log_sample.txt` is een compact, geannoteerd fragment van zo'n capture met
+elk protocolblok, zodat `decode_log.py` meteen iets heeft om op te draaien.
 
 ## Installatie (Ubuntu)
 
@@ -118,7 +120,7 @@ praktijk werkt `pyserial` met `baudrate=16064` op recente Ubuntu-kernels direct.
 | `decode_log.py` | Offline her-analyse van opgeslagen/vrije-vorm hex-logs |
 | `kline_protocol.py` | Protocol-decoder (frames, checksum, velden) — herbruikbaar |
 | `99-ftdi-kkl.rules` | Udev-regel voor vaste poortnaam + rechten |
-| `examples/ECU_Log_sample.txt` | Voorbeeldlog met protocoluitleg |
+| `examples/ECU_Log_sample.txt` | Geannoteerd voorbeeldlog (fragment) |
 
 ## Disclaimer
 
